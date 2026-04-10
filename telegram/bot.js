@@ -13,7 +13,13 @@ function startBot() {
   bot = new TelegramBot(config.telegram.token, { polling: true });
 
   bot.on("polling_error", (err) => {
-    logger.error(`Telegram polling error: ${err.message}`);
+    // Filter error jaringan agar tidak memenuhi console, 
+    // TelegramBot akan otomatis mencoba reconnect di latar belakang.
+    if (err.message.includes("ECONNABORTED") || err.message.includes("EFATAL")) {
+      logger.warn("Jaringan Telegram tidak stabil (ECONNABORTED). Auto-recovering...");
+    } else {
+      logger.error(`Telegram polling error: ${err.message}`);
+    }
   });
 
   registerHandlers(bot);
