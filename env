@@ -1,0 +1,6 @@
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+DEFAULT_REGION=ID
+MAX_NUMBERS_PER_REQUEST=2000
+SESSION_DIR=./session
+OUTPUT_DIR=./output
+LOG_LEVEL=info
