@@ -7,6 +7,7 @@ const {
 } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const path = require("path");
+const fs = require("fs"); // Ditambahkan untuk hapus session
 const config = require("../config");
 const logger = require("../utils/logger");
 const { ensureDir } = require("../utils/file");
@@ -47,33 +48,38 @@ class WhatsAppConnection {
       },
       printQRInTerminal: false,
       logger: silentLogger,
-      browser: ["WA-Checker", "Chrome", "10.0"],
+      browser: ["WA-Checker", "Chrome", "10.0"], // Browser ident untuk WA Web
       syncFullHistory: false,
       markOnlineOnConnect: false,
     });
 
     this.sock.ev.on("creds.update", saveCreds);
 
+    // FIX PAIRING CODE: Panggil sekali saja setelah socket dibuat (delay 3 detik agar stabil)
+    if (phoneNumber && !this.sock.authState.creds.registered) {
+      setTimeout(async () => {
+        try {
+          const formattedPhone = phoneNumber.replace(/\D/g, "");
+          const code = await this.sock.requestPairingCode(formattedPhone);
+          
+          // Format kode menjadi balok (XXXX-XXXX) agar mudah dibaca jika mau
+          const formattedCode = code?.match(/.{1,4}/g)?.join("-") || code;
+          
+          this.pairingCode = formattedCode;
+          logger.info(`Pairing code generated: ${formattedCode}`);
+          if (this._onPairingCode) this._onPairingCode(formattedCode);
+        } catch (err) {
+          logger.error(`Failed to get pairing code: ${err.message}`);
+        }
+      }, 3000);
+    }
+
     this.sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
-      if (qr) {
-        if (phoneNumber && !this.sock.authState.creds.registered) {
-          // Use pairing code instead of QR
-          try {
-            const code = await this.sock.requestPairingCode(
-              phoneNumber.replace(/\D/g, "")
-            );
-            this.pairingCode = code;
-            logger.info(`Pairing code generated: ${code}`);
-            if (this._onPairingCode) this._onPairingCode(code);
-          } catch (err) {
-            logger.error("Failed to get pairing code, falling back to QR");
-            if (this._onQr) this._onQr(qr);
-          }
-        } else {
-          if (this._onQr) this._onQr(qr);
-        }
+      // FIX QR: Hanya emit QR jika TIDAK sedang request pairing code menggunakan nomor telepon
+      if (qr && !phoneNumber && !this.sock.authState.creds.registered) {
+        if (this._onQr) this._onQr(qr);
       }
 
       if (connection === "open") {
@@ -84,15 +90,22 @@ class WhatsAppConnection {
 
       if (connection === "close") {
         this.state = "closed";
-        const reason = lastDisconnect?.error?.output?.statusCode;
-        const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        
+        // Cek apakah disconnect karena dilogout secara manual
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+        const shouldReconnect = !isLoggedOut;
 
-        logger.warn(`WA disconnected, reason: ${reason}, reconnect: ${shouldReconnect}`);
+        logger.warn(`WA disconnected, reason: ${statusCode}, reconnect: ${shouldReconnect}`);
 
-        if (this._onDisconnect) this._onDisconnect(reason);
+        if (this._onDisconnect) this._onDisconnect(statusCode);
 
         if (shouldReconnect) {
           this._scheduleReconnect();
+        } else {
+          // FIX AUTO RECONNECT: Bersihkan folder session jika akun dilogout paksa
+          logger.info("Session logged out. Clearing local session folder...");
+          this._clearSession();
         }
       }
     });
@@ -104,9 +117,22 @@ class WhatsAppConnection {
       logger.info("Attempting WA reconnect...");
       this.connect(this._pairingPhone).catch((err) => {
         logger.error("Reconnect failed:", err.message);
-        this._scheduleReconnect(10000);
+        // Exponential backoff pelan-pelan
+        this._scheduleReconnect(10000); 
       });
     }, delay);
+  }
+
+  // Utility tambahan untuk menghapus folder session
+  _clearSession() {
+    try {
+      if (fs.existsSync(this.authDir)) {
+        fs.rmSync(this.authDir, { recursive: true, force: true });
+        logger.info("Session folder cleared successfully.");
+      }
+    } catch (err) {
+      logger.error(`Failed to clear session folder: ${err.message}`);
+    }
   }
 
   isConnected() {
@@ -119,9 +145,14 @@ class WhatsAppConnection {
 
   async logout() {
     if (this.sock) {
-      await this.sock.logout();
+      try {
+        await this.sock.logout();
+      } catch (err) {
+        logger.error(`Error during logout: ${err.message}`);
+      }
       this.sock = null;
       this.state = "closed";
+      this._clearSession();
     }
   }
 }
