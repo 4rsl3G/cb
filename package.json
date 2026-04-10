@@ -1,0 +1,28 @@
+{
+  "name": "wa-bulk-checker",
+  "version": "1.0.0",
+  "description": "WhatsApp bulk number checker with Telegram bot interface",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "node-telegram-bot-api": "^0.66.0",
+    "libphonenumber-js": "^1.11.4",
+    "p-queue": "^7.4.1",
+    "qrcode": "^1.5.3",
+    "pino": "^9.3.2",
+    "pino-pretty": "^11.2.1",
+    "dotenv": "^16.4.5",
+    "axios": "^1.7.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
